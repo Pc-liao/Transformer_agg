@@ -1,5 +1,5 @@
 CUDA_VISIBLE_DEVICES=1 python train.py \
-    /chome/lpc/cnndm_data/truncate_500/cnndm_bin_joindir \
+    /yourdata_dir \
     --arch transformer_agg_copy --share-decoder-input-output-embed \
     --share-all-embeddings \
     --agg-method attn --agg-layers 1 \
