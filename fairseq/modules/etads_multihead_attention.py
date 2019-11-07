@@ -9,6 +9,8 @@ from torch.nn import Parameter
 import torch.nn.functional as F
 
 from fairseq import utils
+
+
 # torch.autograd.set_detect_anomaly(True)
 
 class EtadsMultiheadAttention(nn.Module):
@@ -40,12 +42,12 @@ class EtadsMultiheadAttention(nn.Module):
         if self.self_attention:
             # self.weight_p = Parameter(torch.Tensor(embed_dim, embed_dim))
             # self.weight_g = Parameter(torch.Tensor(embed_dim, embed_dim))
-            # self.weight_c = Parameter(torch.Tensor(embed_dim))
-            # self.weight_d = Parameter(torch.Tensor(embed_dim))
+            self.weight_c = Parameter(torch.Tensor(num_heads, 1, self.head_dim))
+            self.weight_d = Parameter(torch.Tensor(num_heads, 1, self.head_dim))
             self.proj_p = nn.Linear(embed_dim, embed_dim, bias=False)
             self.proj_g = nn.Linear(embed_dim, embed_dim, bias=False)
-            self.proj_c = nn.Linear(self.head_dim, 1, bias=False)
-            self.proj_d = nn.Linear(self.head_dim, 1, bias=False)
+            # self.proj_c = nn.Linear(self.head_dim, 1, bias=False)
+            # self.proj_d = nn.Linear(self.head_dim, 1, bias=False)
 
         if self.encoder_decoder_attention:
             # self.h_proj_weight = Parameter(torch.Tensor(embed_dim, embed_dim))
@@ -95,6 +97,9 @@ class EtadsMultiheadAttention(nn.Module):
             nn.init.xavier_uniform_(self.k_proj_weight)
             nn.init.xavier_uniform_(self.v_proj_weight)
             nn.init.xavier_uniform_(self.q_proj_weight)
+        if self.self_attention:
+            nn.init.xavier_uniform_(self.weight_c)
+            nn.init.xavier_uniform_(self.weight_d)
 
         nn.init.xavier_uniform_(self.out_proj.weight)
         if self.in_proj_bias is not None:
@@ -156,26 +161,43 @@ class EtadsMultiheadAttention(nn.Module):
         # _g = torch.Tensor(tgt_len,self.embed_dim).cuda()
         # type(tgt_len,tgt_len) [[0,1,2,3...],[0,1,2,3...]]
         # tmp_q, tmp_k = Parameter(torch.Tensor(tgt_len, bsz * self.num_heads, self.head_dim)), Parameter(torch.Tensor(tgt_len, bsz * self .num_heads, self.head_dim))
-        abs_pos = torch.arange(0, tgt_len).float().unsqueeze(0).repeat(tgt_len, 1).cuda()
-        salient_g = torch.Tensor(tgt_len, tgt_len).cuda()
+        # abs_pos = torch.arange(0, tgt_len).float().unsqueeze(0).repeat(tgt_len, 1).cuda()
+        # salient_g = torch.Tensor(tgt_len, tgt_len).cuda()
+        focus, salient_g = None, None
         if self.self_attention:
             # self-attention
             q, k, v = self.in_proj_qkv(query)
-            _g = q.sum(0).unsqueeze(0).repeat(tgt_len, 1, 1)
-
+            # _g = q.sum(0).unsqueeze(0).repeat(tgt_len, 1, 1)
+            _g = torch.mean(q, dim=0, keepdim=True)
             tmp_tensor = torch.tanh(self.proj_p(q) + self.proj_g(_g))
-            tmp_tensor = tmp_tensor.contiguous().view(tgt_len, bsz * self.num_heads, self.head_dim).transpose(0, 1)
-
+            # tmp_tensor = tmp_tensor.contiguous().view(tgt_len, bsz * self.num_heads, self.head_dim).transpose(0, 1)
+            tmp_tensor = tmp_tensor.view(tgt_len, bsz, self.num_heads, self.head_dim).transpose(0, 1) \
+                .transpose(1, 2)
             # calculate tanh(w_q*q+w_g*g)
-            mu = self.proj_c(tmp_tensor)
-            sigma = self.proj_d(tmp_tensor)
+            # mu = self.proj_c(tmp_tensor)
+            # sigma = self.proj_d(tmp_tensor)
+            # bsz * num_heads * tgt_len * head_dim
+            mu = tmp_tensor * self.weight_c
+            # bsz * num_heads * tgt_len
+            mu = mu.sum(3).squeeze()
+            sigma = tmp_tensor * self.weight_d
+            sigma = sigma.sum(3).squeeze()
 
-            # norm for mu and sigma $m * sigmoid(mu)$
+            # norm for mu and sigma $m * sigmoid(mu)$, and for self-attention query=key=value, so tgt_len == key_len
             mu = tgt_len * torch.sigmoid(mu)  # size(tgt_len)
             sigma = tgt_len * torch.sigmoid(sigma)  # size(tgt_len)
 
-            mu = mu.repeat(1, 1, tgt_len)
-            sigma = sigma.repeat(1, 1, tgt_len)
+            # mu = mu.repeat(1, 1, tgt_len)
+            # sigma = sigma.repeat(1, 1, tgt_len)
+            # abs_pos = torch.arange(start=0, end=tgt_len, dtype=mu.dtype).unsqueeze(0).repeat(tgt_len, 1).cuda()
+            # 1 * 1 * 1 * tgt_len(key_len)
+            abs_pos = torch.arange(start=0, end=tgt_len, dtype=mu.dtype).unsqueeze(0).unsqueeze(0).unsqueeze(0).cuda()
+            mu = mu.unsqueeze(-1)
+            sigma = sigma.unsqueeze(-1)
+
+            focus = -2 * (sigma ** (-2)) * ((abs_pos - mu) ** 2)  # -\frac{(p-u)^2}{sigma^2/2}
+            focus = focus.view(bsz * self.num_heads, tgt_len, tgt_len)
+
         elif self.encoder_decoder_attention:
             # encoder-decoder attention
             q = self.in_proj_q(query)
@@ -186,9 +208,9 @@ class EtadsMultiheadAttention(nn.Module):
                 k = self.in_proj_k(key)
                 v = self.in_proj_v(key)
             # tmp_q = q
-            tmp_q =  self.proj_h(query)
+            tmp_q = self.proj_h(query)
             tmp_q = tmp_q.contiguous().view(tgt_len, bsz * self.num_heads, self.head_dim).transpose(0, 1)
-            tmp_k = self.proj_s(key)# F.linear(k, self.s_proj_weight, bias=False)# self.proj_s(k)
+            tmp_k = self.proj_s(key)  # F.linear(k, self.s_proj_weight, bias=False)# self.proj_s(k)
             tmp_k = tmp_k.contiguous().view(-1, bsz * self.num_heads, self.head_dim).transpose(0, 1).transpose(1, 2)
             tmp_bmm = torch.bmm(tmp_q, tmp_k)
             salient_g = torch.sigmoid(tmp_bmm)
@@ -259,13 +281,10 @@ class EtadsMultiheadAttention(nn.Module):
         attn_weights = self.apply_sparse_mask(attn_weights, tgt_len, src_len, bsz)
 
         if self.self_attention:
-            focus = 2 * (sigma**-2) * ((abs_pos-mu)**2)  # \frac{(p-u)^2}{sigma^2/2}
+            # focus = -2 * (sigma**-2) * ((abs_pos-mu)**2)  # -\frac{(p-u)^2}{sigma^2/2}
             # print(focus.size())
             # print(attn_weights.size())
             attn_weights = attn_weights + focus
-        if self.encoder_decoder_attention:
-            # print(attn_weights.size())
-            attn_weights = attn_weights * salient_g
 
         assert list(attn_weights.size()) == [bsz * self.num_heads, tgt_len, src_len]
 
@@ -294,10 +313,15 @@ class EtadsMultiheadAttention(nn.Module):
         attn_weights = utils.softmax(
             attn_weights, dim=-1, onnx_trace=self.onnx_trace,
         ).type_as(attn_weights)
+
+        if self.encoder_decoder_attention:
+            # print(attn_weights.size())
+            attn_weights = attn_weights * salient_g
+
         attn_weights = F.dropout(attn_weights, p=self.dropout, training=self.training)
 
         attn = torch.bmm(attn_weights, v)
-        
+
         assert list(attn.size()) == [bsz * self.num_heads, tgt_len, self.head_dim]
         if (self.onnx_trace and attn.size(1) == 1):
             # when ONNX tracing a single decoder step (sequence length == 1)
