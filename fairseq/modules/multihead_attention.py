@@ -239,6 +239,8 @@ class MultiheadAttention(nn.Module):
                 )
             attn_weights = attn_weights.view(bsz * self.num_heads, tgt_len, src_len)
 
+        # topk attn_weights
+
         attn_weights = utils.softmax(
             attn_weights, dim=-1, onnx_trace=self.onnx_trace,
         ).type_as(attn_weights)
@@ -256,11 +258,12 @@ class MultiheadAttention(nn.Module):
 
         if need_weights:
             # average attention weights over heads
-            attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len)
-            attn_weights = attn_weights.sum(dim=1) / self.num_heads
+            # attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len)
+            # attn_weights = attn_weights.sum(dim=1) / self.num_heads
+            # learn from open-nmt, we use one attention
+            attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len)[:, 0, :, :].contiguous()
         else:
             attn_weights = None
-
         return attn, attn_weights
 
     def in_proj_qkv(self, query):

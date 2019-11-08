@@ -3,7 +3,9 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import torch
 import torch.nn as nn
+
 
 from fairseq import utils
 
@@ -53,7 +55,12 @@ class FairseqDecoder(nn.Module):
 
     def get_normalized_probs(self, net_output, log_probs, sample):
         """Get normalized probabilities (or log probs) from a net's output."""
-        
+
+        if 'net_input' in sample.keys():
+            enc_seq_ids = sample['net_input']['src_tokens']
+        else:
+            # not used
+            enc_seq_ids = sample['src_tokens']
 
         if hasattr(self, 'adaptive_softmax') and self.adaptive_softmax is not None:
             if sample is not None:
@@ -65,14 +72,12 @@ class FairseqDecoder(nn.Module):
             return out.exp_() if not log_probs else out
 
         logits = net_output[0]
+
         is_copy = 'p_copy' in net_output[1].keys() and net_output[1]['p_copy'] is not None
+        # print(net_output[1]['attn'])
         if is_copy:
             p_copy = net_output[1]['p_copy']
-            if 'net_input' in sample.keys():
-                enc_seq_ids = sample['net_input']['src_tokens']
-            else:
-                # not used 
-                enc_seq_ids = sample['src_tokens']
+
             enc_seq_ids = enc_seq_ids.unsqueeze(1).repeat(1, net_output[1]['attn'].size(1), 1)
             generate_prob = utils.softmax(logits, dim=-1, onnx_trace=self.onnx_trace) * (1-p_copy)
             copy_prob = net_output[1]['attn'] * p_copy

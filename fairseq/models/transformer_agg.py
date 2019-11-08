@@ -298,7 +298,7 @@ class TransformerEncoder(FairseqEncoder):
                 his, _ = self.attn(query=his, key=prev_x[idx], value=prev_x[idx], key_padding_mask=encoder_padding_mask)
                 his = F.dropout(his, p=self.dropout, training=self.training)
             x, _ = self.attn(query=his, key=x, value=x, key_padding_mask=encoder_padding_mask)
-            x = F.dropout(x, p=self.dropout, training=self.training)
+        x = F.dropout(x, p=self.dropout, training=self.training)
         if self.layer_norm:
             x = self.layer_norm(x)
 
@@ -498,7 +498,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
         if self.project_out_dim is not None:
             x = self.project_out_dim(x)
-        
+
         p_copy = None
         if self.copy:
             p_copy = torch.sigmoid(self.linear_copy(x))
@@ -606,14 +606,3 @@ def base_architecture(args):
 
     args.decoder_output_dim = getattr(args, 'decoder_output_dim', args.decoder_embed_dim)
     args.decoder_input_dim = getattr(args, 'decoder_input_dim', args.decoder_embed_dim)
-
-@register_model_architecture('transformer_agg', 'transformer_agg_etads')
-def transformer_agg_etads(args):
-    args.use_focus_attn = getattr(args, 'use_focus_attn', True)
-    args.selection_net = getattr(args, 'selection_net', True)
-    base_architecture(args)
-
-@register_model_architecture('transformer_agg', 'transformer_agg_copy')
-def transformer_agg_copy(args):    
-    args.copy = getattr(args, 'copy', True)
-    base_architecture(args)
