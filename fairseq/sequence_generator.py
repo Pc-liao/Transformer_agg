@@ -287,7 +287,6 @@ class SequenceGenerator(object):
                     reorder_state.view(-1, beam_size).add_(corr.unsqueeze(-1) * beam_size)
                 model.reorder_incremental_state(reorder_state)
                 encoder_outs = model.reorder_encoder_out(encoder_outs, reorder_state)
-
             lprobs, avg_attn_scores = model.forward_decoder(
                 tokens[:, :step + 1], encoder_outs, temperature=self.temperature,
             )
@@ -588,7 +587,7 @@ class EnsembleModel(torch.nn.Module):
             attn = attn.get('attn', None)
         if attn is not None:
             attn = attn[:, -1, :]
-        probs = model.get_normalized_probs(decoder_out, log_probs=log_probs)
+        probs = model.get_normalized_probs(decoder_out, log_probs=log_probs, sample={"src_tokens": tokens})
         probs = probs[:, -1, :]
         return probs, attn
 

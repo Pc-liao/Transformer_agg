@@ -256,6 +256,7 @@ class TransformerDecoderLayer(nn.Module):
                 prev_key, prev_value = prev_attn_state
                 saved_state = {"prev_key": prev_key, "prev_value": prev_value}
                 self.encoder_attn._set_input_buffer(incremental_state, saved_state)
+
             x, attn = self.encoder_attn(
                 query=x,
                 key=encoder_out,
@@ -263,7 +264,7 @@ class TransformerDecoderLayer(nn.Module):
                 key_padding_mask=encoder_padding_mask,
                 incremental_state=incremental_state,
                 static_kv=True,
-                need_weights=self.need_attn,
+                need_weights=True,
             )
             x = F.dropout(x, p=self.dropout, training=self.training)
             x = residual + x

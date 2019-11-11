@@ -59,7 +59,7 @@ class FairseqDecoder(nn.Module):
         if 'net_input' in sample.keys():
             enc_seq_ids = sample['net_input']['src_tokens']
         else:
-            # not used
+            # for decode step
             enc_seq_ids = sample['src_tokens']
 
         if hasattr(self, 'adaptive_softmax') and self.adaptive_softmax is not None:
