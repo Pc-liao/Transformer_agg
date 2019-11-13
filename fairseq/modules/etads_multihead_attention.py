@@ -119,6 +119,7 @@ class EtadsMultiheadAttention(nn.Module):
         the key by passing a binary ByteTensor (`key_padding_mask`) with shape:
         batch x src_len, where padding elements are indicated by 1s.
         """
+
         tgt_len, bsz, embed_dim = query.size()
         assert embed_dim == self.embed_dim
         assert list(query.size()) == [tgt_len, bsz, embed_dim]
@@ -146,6 +147,7 @@ class EtadsMultiheadAttention(nn.Module):
                                                       k_proj_weight=self.k_proj_weight,
                                                       v_proj_weight=self.v_proj_weight)
 
+        tmp_q, tmp_k = query, key
         if incremental_state is not None:
             saved_state = self._get_input_buffer(incremental_state)
             if 'prev_key' in saved_state:
@@ -157,12 +159,6 @@ class EtadsMultiheadAttention(nn.Module):
         else:
             saved_state = None
 
-        mu, sigma = Parameter(torch.Tensor(tgt_len, tgt_len)).cuda(), Parameter(torch.Tensor(tgt_len, tgt_len)).cuda()
-        # _g = torch.Tensor(tgt_len,self.embed_dim).cuda()
-        # type(tgt_len,tgt_len) [[0,1,2,3...],[0,1,2,3...]]
-        # tmp_q, tmp_k = Parameter(torch.Tensor(tgt_len, bsz * self.num_heads, self.head_dim)), Parameter(torch.Tensor(tgt_len, bsz * self .num_heads, self.head_dim))
-        # abs_pos = torch.arange(0, tgt_len).float().unsqueeze(0).repeat(tgt_len, 1).cuda()
-        # salient_g = torch.Tensor(tgt_len, tgt_len).cuda()
         focus, salient_g = None, None
         if self.self_attention:
             # self-attention
@@ -208,12 +204,12 @@ class EtadsMultiheadAttention(nn.Module):
                 k = self.in_proj_k(key)
                 v = self.in_proj_v(key)
             # tmp_q = q
-            tmp_q = self.proj_h(query)
+
+            tmp_q = self.proj_h(tmp_q)
             tmp_q = tmp_q.contiguous().view(tgt_len, bsz * self.num_heads, self.head_dim).transpose(0, 1)
-            tmp_k = self.proj_s(key)  # F.linear(k, self.s_proj_weight, bias=False)# self.proj_s(k)
+            tmp_k = self.proj_s(tmp_k)  # F.linear(k, self.s_proj_weight, bias=False)# self.proj_s(k)
             tmp_k = tmp_k.contiguous().view(-1, bsz * self.num_heads, self.head_dim).transpose(0, 1).transpose(1, 2)
-            tmp_bmm = torch.bmm(tmp_q, tmp_k)
-            salient_g = torch.sigmoid(tmp_bmm)
+            salient_g = torch.sigmoid(torch.bmm(tmp_q, tmp_k))
             # print(salient_g.size())
         else:
             q = self.in_proj_q(query)

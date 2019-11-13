@@ -114,6 +114,7 @@ class TransformerModel(FairseqEncoderDecoderModel):
                             help='if set, use focus attention')
         parser.add_argument('--selection-net', default=False, action='store_true',
                             help='if set, use selection net')
+
     # fmt: on
 
     @classmethod
@@ -211,21 +212,6 @@ class TransformerEncoder(FairseqEncoder):
             for i in range(args.encoder_layers)
         ])
 
-        # self.conv_layers = nn.ModuleList([])
-        # self.conv_layers.extend(
-        # 	[
-        # 		nn.Sequential(
-        # 			torch.nn.Conv1d(embed_dim, embed_dim, args.encoder_layers-i),
-        # 			torch.nn.ReLu(),
-        # 			torch.nn.MaxPool1d(i+1)
-        # 		)for i in range(args.encoder_layers - 1)
-        # 	]
-        # )
-        # EtadsMultiheadAttention
-        # self.attn = EtadsMultiheadAttention(
-        #     embed_dim, args.encoder_attention_heads,
-        #     dropout=args.attention_dropout, encoder_decoder_attention=True
-        # )
         self.attn = MultiheadAttention(
             embed_dim, args.encoder_attention_heads,
             dropout=args.attention_dropout, encoder_decoder_attention=True
@@ -301,7 +287,6 @@ class TransformerEncoder(FairseqEncoder):
         x = F.dropout(x, p=self.dropout, training=self.training)
         if self.layer_norm:
             x = self.layer_norm(x)
-
         return {
             'encoder_out': x,  # T x B x C
             'encoder_padding_mask': encoder_padding_mask,  # B x T
@@ -325,6 +310,22 @@ class TransformerEncoder(FairseqEncoder):
             encoder_out['encoder_padding_mask'] = \
                 encoder_out['encoder_padding_mask'].index_select(0, new_order)
         return encoder_out
+
+    def reorder_encoder_input(self, encoder_input, new_order):
+        """
+                Reorder encoder input according to *new_order*.
+
+                Args:
+                    encoder_input: output from the ``forward()`` method
+                    new_order (LongTensor): desired order
+
+                Returns:
+                    *encoder_input* rearranged according to *new_order*
+                """
+        if encoder_input['src_tokens'] is not None:
+            encoder_input['src_tokens'] = \
+                encoder_input['src_tokens'].index_select(0, new_order)
+        return encoder_input
 
     def max_positions(self):
         """Maximum input length supported by the encoder."""
@@ -384,8 +385,6 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
         # calculate copy probability p(z=1) batch
         self.copy = args.copy
-        if self.copy:
-            self.linear_copy = Linear(input_embed_dim, 1)
 
         self.project_in_dim = Linear(input_embed_dim, embed_dim, bias=False) if embed_dim != input_embed_dim else None
 
@@ -399,6 +398,12 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             TransformerDecoderLayer(args, no_encoder_attn)
             for _ in range(args.decoder_layers)
         ])
+        if self.copy:
+            self.copy_attn = MultiheadAttention(
+                embed_dim, 1,
+                dropout=args.attention_dropout,
+                encoder_decoder_attention=True,)
+            self.linear_copy = Linear(embed_dim, 1)
 
         self.adaptive_softmax = None
 
@@ -478,7 +483,6 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         attn = None
 
         inner_states = [x]
-
         # decoder layers
         for layer in self.layers:
             x, attn = layer(
@@ -492,7 +496,19 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
         if self.layer_norm:
             x = self.layer_norm(x)
-
+        copy_x, copy_attn = None, None
+        if self.copy:
+            copy_x, copy_attn = self.copy_attn(query=x,
+                                                    key=encoder_out['encoder_out'] if encoder_out is not None else None,
+                                                    value=encoder_out[
+                                                        'encoder_out'] if encoder_out is not None else None,
+                                                    key_padding_mask=encoder_out[
+                                                        'encoder_padding_mask'] if encoder_out is not None else None,
+                                                    incremental_state=incremental_state,
+                                                    static_kv=True,
+                                                    need_weights=True,
+                                                    )
+            copy_x = copy_x.transpose(0, 1)
         # T x B x C -> B x T x C
         x = x.transpose(0, 1)
 
@@ -501,9 +517,10 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
         p_copy = None
         if self.copy:
-            p_copy = torch.sigmoid(self.linear_copy(x))
-
-        return x, {'attn': attn, 'inner_states': inner_states, 'p_copy': p_copy}
+            # p_copy = torch.sigmoid(self.linear_copy(copy_attn))
+            p_copy = torch.sigmoid(self.linear_copy(copy_x))
+        # return x, {'attn': attn, 'inner_states': inner_states, 'p_copy': p_copy}
+        return x, {'attn': attn, 'inner_states': inner_states, 'p_copy': p_copy, 'copy_attn': copy_attn}
 
     def output_layer(self, features, **kwargs):
         """Project features to the vocabulary size."""
@@ -515,6 +532,45 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 return F.linear(features, self.embed_out)
         else:
             return features
+
+    def get_normalized_probs(self, net_output, log_probs, sample):
+        """Get normalized probabilities (or log probs) from a net's output."""
+
+        if 'net_input' in sample.keys():
+            enc_seq_ids = sample['net_input']['src_tokens']
+        else:
+            # for decode step
+            enc_seq_ids = sample['src_tokens']
+
+        if hasattr(self, 'adaptive_softmax') and self.adaptive_softmax is not None:
+            if sample is not None:
+                assert 'target' in sample
+                target = sample['target']
+            else:
+                target = None
+            out = self.adaptive_softmax.get_log_prob(net_output[0], target=target)
+            return out.exp_() if not log_probs else out
+
+        logits = net_output[0]
+
+        is_copy = 'p_copy' in net_output[1].keys() and net_output[1]['p_copy'] is not None
+        # print(net_output[1]['attn'])
+        if is_copy and False:
+            p_copy = net_output[1]['p_copy']
+
+            enc_seq_ids = enc_seq_ids.unsqueeze(1).repeat(1, net_output[1]['copy_attn'].size(1), 1)
+            generate_prob = utils.softmax(logits, dim=-1, onnx_trace=self.onnx_trace) * (1 - p_copy)
+            copy_prob = net_output[1]['copy_attn'] * p_copy
+            final = generate_prob.scatter_add(2, enc_seq_ids, copy_prob)
+            if log_probs:
+                return torch.log(final + 1e-15)
+            else:
+                return final
+        else:
+            if log_probs:
+                return utils.log_softmax(logits, dim=-1, onnx_trace=self.onnx_trace)
+            else:
+                return utils.softmax(logits, dim=-1, onnx_trace=self.onnx_trace)
 
     def max_positions(self):
         """Maximum output length supported by the decoder."""
