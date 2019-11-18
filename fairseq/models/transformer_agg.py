@@ -402,7 +402,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             self.copy_attn = MultiheadAttention(
                 embed_dim, 1,
                 dropout=args.attention_dropout,
-                encoder_decoder_attention=True,)
+                encoder_decoder_attention=True, )
             self.linear_copy = Linear(embed_dim, 1)
 
         self.adaptive_softmax = None
@@ -499,26 +499,26 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         copy_x, copy_attn = None, None
         if self.copy:
             copy_x, copy_attn = self.copy_attn(query=x,
-                                                    key=encoder_out['encoder_out'] if encoder_out is not None else None,
-                                                    value=encoder_out[
-                                                        'encoder_out'] if encoder_out is not None else None,
-                                                    key_padding_mask=encoder_out[
-                                                        'encoder_padding_mask'] if encoder_out is not None else None,
-                                                    incremental_state=incremental_state,
-                                                    static_kv=True,
-                                                    need_weights=True,
-                                                    )
-            copy_x = copy_x.transpose(0, 1)
+                                               key=encoder_out['encoder_out'] if encoder_out is not None else None,
+                                               value=encoder_out[
+                                                   'encoder_out'] if encoder_out is not None else None,
+                                               key_padding_mask=encoder_out[
+                                                   'encoder_padding_mask'] if encoder_out is not None else None,
+                                               incremental_state=incremental_state,
+                                               static_kv=True,
+                                               need_weights=True,
+                                               )
+            # copy_x = copy_x.transpose(0, 1)
+        p_copy = None
+        if self.copy:
+            # p_copy = torch.sigmoid(self.linear_copy(copy_attn))
+            p_copy = torch.sigmoid(self.linear_copy(x)).transpose(0, 1)
         # T x B x C -> B x T x C
         x = x.transpose(0, 1)
 
         if self.project_out_dim is not None:
             x = self.project_out_dim(x)
 
-        p_copy = None
-        if self.copy:
-            # p_copy = torch.sigmoid(self.linear_copy(copy_attn))
-            p_copy = torch.sigmoid(self.linear_copy(copy_x))
         # return x, {'attn': attn, 'inner_states': inner_states, 'p_copy': p_copy}
         return x, {'attn': attn, 'inner_states': inner_states, 'p_copy': p_copy, 'copy_attn': copy_attn}
 
@@ -536,12 +536,6 @@ class TransformerDecoder(FairseqIncrementalDecoder):
     def get_normalized_probs(self, net_output, log_probs, sample):
         """Get normalized probabilities (or log probs) from a net's output."""
 
-        if 'net_input' in sample.keys():
-            enc_seq_ids = sample['net_input']['src_tokens']
-        else:
-            # for decode step
-            enc_seq_ids = sample['src_tokens']
-
         if hasattr(self, 'adaptive_softmax') and self.adaptive_softmax is not None:
             if sample is not None:
                 assert 'target' in sample
@@ -557,7 +551,11 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         # print(net_output[1]['attn'])
         if is_copy and False:
             p_copy = net_output[1]['p_copy']
-
+            if 'net_input' in sample.keys():
+                enc_seq_ids = sample['net_input']['src_tokens']
+            else:
+                # for decode step
+                enc_seq_ids = sample['src_tokens']
             enc_seq_ids = enc_seq_ids.unsqueeze(1).repeat(1, net_output[1]['copy_attn'].size(1), 1)
             generate_prob = utils.softmax(logits, dim=-1, onnx_trace=self.onnx_trace) * (1 - p_copy)
             copy_prob = net_output[1]['copy_attn'] * p_copy
