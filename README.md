@@ -1,6 +1,6 @@
 # Transformer_agg
 
-data could be download: https://drive.google.com/drive/folders/1SlZ9PFlEIizh5r5vcmCLzkaZI34p9P3T?usp=sharing
+data could be download: https://drive.google.com/open?id=1SlZ9PFlEIizh5r5vcmCLzkaZI34p9P3T
 
 ## truncate and use bpe
 1.move `scripts/truncate_data.py` to your dataset dir and modify the truncate length then run 
