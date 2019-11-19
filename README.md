@@ -12,21 +12,21 @@ python truncate_data.py
 python prepro.py
 ```
 ## preprocessing
-You also need modify datadir in script `preprocess.sh`
+You also need modify `$raw_data_dir` and `$data_dir` in script `preprocess.sh`
 ``` commandline
 chmod u+x preprocess.sh # optional, if you dont have permission
 bash preprocess.sh
 ```
 
 ## training
-modify your datadir in `train_sum_attn.sh` as the output dir of preprocessing
+modify `$data_dir` and `$model_saved_dir` in `train_sum_attn.sh` 
 ``` commandline
 chmod u+x train_sum_attn.sh # optional, if you dont have permission
 bash train_sum_attn.sh
 ```
 
 ## generating
-
+modify `$data_dir` and `$result` in `generate_cnn.sh` 
 ``` commandline
 chmod u+x generate_cnn.sh # optional, if you dont have permission
 bash generate_cnn.sh

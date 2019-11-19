@@ -85,12 +85,12 @@ def main(args):
 
     # Generate and compute rouge score
     hyp_list, ref_list = [], []
-    
+
     if args.sacrebleu:
         scorer = bleu.SacrebleuScorer()
     else:
         scorer = bleu.Scorer(tgt_dict.pad(), tgt_dict.eos(), tgt_dict.unk())
-    
+
     num_sentences = 0
     has_target = True
     with progress_bar.build_progress_bar(args, itr) as t:
@@ -174,7 +174,7 @@ def main(args):
                             scorer.add_string(target_str, hypo_str)
                         else:
                             scorer.add(target_tokens, hypo_tokens)
-            
+
             wps_meter.update(num_generated_tokens)
             t.log({'wps': round(wps_meter.avg)})
             num_sentences += sample['nsentences']
@@ -184,8 +184,7 @@ def main(args):
     print('| Translated {} sentences ({} tokens) in {:.1f}s ({:.2f} sentences/s, {:.2f} tokens/s)'.format(
         num_sentences, gen_timer.n, gen_timer.sum, num_sentences / gen_timer.sum, 1. / gen_timer.avg))
     if has_target:
-        # print('| Generate {} with beam={}: bleu1: {}, bleu2: {}, bleu3: {}, bleu4: {}'.format(args.gen_subset, args.beam, scorer.result_string(1), scorer.result_string(2), scorer.result_string(3), scorer.result_string(4)))
-        # Calculate BLEU-4 scores
+        # Calculate ROUGE and BLEU-4 scores
         print('| Generate {} with beam={}: {}'.format(args.gen_subset, args.beam, score))
         print('Cumulative 1-gram: %f' % corpus_bleu(references, hypotheses, weights=[1, 0, 0, 0]))
         print('Cumulative 2-gram: %f' % corpus_bleu(references, hypotheses, weights=[0.5, 0.5, 0, 0]))
@@ -201,6 +200,7 @@ def cli_main():
     args = options.parse_args_and_arch(parser)
     main(args)
 
+
 def write_to_file_hyp_ref(filedir, hyp_list, ref_list):
     import os
     from nltk.tokenize import sent_tokenize
@@ -208,11 +208,13 @@ def write_to_file_hyp_ref(filedir, hyp_list, ref_list):
     os.makedirs(os.path.join(filedir, "hyp"), exist_ok=True)
     os.makedirs(os.path.join(filedir, "ref"), exist_ok=True)
     for idx, (hyp, ref) in enumerate(zip(hyp_list, ref_list)):
-        with open(os.path.join(filedir, "hyp", "{}.txt".format(idx)), 'w') as hyp_writer, open(os.path.join(filedir, "ref", "{}.txt".format(idx)), 'w') as ref_writer:
+        with open(os.path.join(filedir, "hyp", "{}.txt".format(idx)), 'w') as hyp_writer, open(
+                os.path.join(filedir, "ref", "{}.txt".format(idx)), 'w') as ref_writer:
             hyp_writer.write('\n'.join(sent_tokenize(hyp)))
             ref_writer.write('\n'.join(sent_tokenize(ref)))
-        if idx+1 % 1000  == 0:
-            print("{} file writed".format(idx+1))
+        if idx + 1 % 1000 == 0:
+            print("{} file writed".format(idx + 1))
+
 
 if __name__ == '__main__':
     cli_main()
