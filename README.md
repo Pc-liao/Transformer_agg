@@ -11,7 +11,7 @@ python truncate_data.py
 ```commandline
 python prepro.py
 ```
-## preprocessing(or download data from [data]{https://drive.google.com/open?id=1SlZ9PFlEIizh5r5vcmCLzkaZI34p9P3T})
+## preprocessing(or download data from [data](https://drive.google.com/open?id=1SlZ9PFlEIizh5r5vcmCLzkaZI34p9P3T)
 You also need modify `$raw_data_dir` and `$data_dir` in script `preprocess.sh`
 ``` commandline
 chmod u+x preprocess.sh # optional, if you dont have permission
