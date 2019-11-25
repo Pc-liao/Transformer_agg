@@ -1,8 +1,8 @@
 # Transformer_agg
 
-data could be download: https://drive.google.com/open?id=1SlZ9PFlEIizh5r5vcmCLzkaZI34p9P3T
+data and checkpoint could be download: https://drive.google.com/open?id=1SlZ9PFlEIizh5r5vcmCLzkaZI34p9P3T
 
-## truncate and use bpe
+## truncate and use bpe(optional)
 1.move `scripts/truncate_data.py` to your dataset dir and modify the truncate length then run 
 ``` commandline
 python truncate_data.py
@@ -11,7 +11,7 @@ python truncate_data.py
 ```commandline
 python prepro.py
 ```
-## preprocessing
+## preprocessing(or download data from [data]{https://drive.google.com/open?id=1SlZ9PFlEIizh5r5vcmCLzkaZI34p9P3T})
 You also need modify `$raw_data_dir` and `$data_dir` in script `preprocess.sh`
 ``` commandline
 chmod u+x preprocess.sh # optional, if you dont have permission
